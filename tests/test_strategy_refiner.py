@@ -2,11 +2,12 @@ import unittest
 from unittest.mock import patch
 
 from agents.strategy_refiner import (
-    calculate_coverage, 
-    check_max_cycles, 
+    calculate_coverage,
+    check_max_cycles,
     check_diminishing_returns,
-    get_unresolved_tensions, 
-    strategy_refiner_node
+    get_unresolved_tensions,
+    strategy_refiner_node,
+    RefinerDecision,
 )
 
 class TestStrategyRefiner(unittest.TestCase):
@@ -65,14 +66,14 @@ class TestStrategyRefiner(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "Maximum cycle limit reached.")
         self.assertEqual(result["refiner_decision"]["new_query_terms"], [])
 
-    @patch("strategy_refiner.generate_json")
+    @patch("agents.strategy_refiner.generate_json")
     def test_strategy_refiner_node_continue(self, mock_generate_json):
-        mock_generate_json.return_value = {
-            "decision": "continue",
-            "new_query_terms": ["intermittent fasting", "longevity"],
-            "papers_to_reexamine": ["p4", "p5"],
-            "rationale": "Testing LLM routing."
-        }
+        mock_generate_json.return_value = RefinerDecision(
+            decision="continue",
+            new_query_terms=["intermittent fasting", "longevity"],
+            papers_to_reexamine=["p4", "p5"],
+            rationale="Testing LLM routing.",
+        )
         
         state = {
             "cycle_n": 1,

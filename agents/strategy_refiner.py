@@ -11,18 +11,7 @@ Responsibilities:
 from typing import Any, Dict, List, Literal
 from pydantic import BaseModel
 
-# Safe fallback for local development if tools.llm hasn't been created yet
-try:
-    from tools.llm import generate_json
-except ImportError:
-    def generate_json(prompt: str, schema: dict) -> dict:
-        """Fallback mock function when tools.llm is unavailable."""
-        return {
-            "decision": "continue",
-            "new_query_terms": ["fallback term 1", "fallback term 2"],
-            "papers_to_reexamine": [],
-            "rationale": "Fallback mock response due to missing tools.llm module."
-        }
+from tools.llm import generate_json
 
 class RefinerDecision(BaseModel):
     decision: Literal["continue", "stop"]
@@ -133,14 +122,16 @@ def strategy_refiner_node(state: Any) -> Dict[str, Any]:
     to address coverage gaps and unresolved tensions.
     """
     
-    response_dict = generate_json(prompt, RefinerDecision.model_json_schema())
+    # generate_json returns a validated RefinerDecision instance, not a dict
+    # (see tools/llm.py) - pass the model class itself, not its json schema.
+    response = generate_json(prompt, RefinerDecision)
 
     return {
         "coverage_score": coverage_score,
         "refiner_decision": {
-            "decision": response_dict.get("decision", "continue"),
-            "new_query_terms": response_dict.get("new_query_terms", []),
-            "papers_to_reexamine": response_dict.get("papers_to_reexamine", []),
-            "rationale": response_dict.get("rationale", "")
+            "decision": response.decision,
+            "new_query_terms": response.new_query_terms,
+            "papers_to_reexamine": response.papers_to_reexamine,
+            "rationale": response.rationale
         }
     }
