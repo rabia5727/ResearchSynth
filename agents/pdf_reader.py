@@ -49,8 +49,10 @@ class _FindingsExtraction(BaseModel):
 
 def fetch_pdf(paper: PaperRecord, *, dest_dir: str | Path = ".cache/pdfs", timeout: int = 20) -> str | None:
     """Download paper.url to a local file. Returns the local path, or None on
-    failure (paywalled / 403 / 404 / network error) - the caller marks
-    pdf_accessible=False and moves on rather than failing the whole cycle.
+    failure (paywalled / 403 / 404 / network error / not actually a PDF -
+    many search results point to a landing page, not a raw PDF link) - the
+    caller marks pdf_accessible=False and moves on rather than failing the
+    whole cycle.
     """
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -61,11 +63,17 @@ def fetch_pdf(paper: PaperRecord, *, dest_dir: str | Path = ".cache/pdfs", timeo
     try:
         response = requests.get(paper.url, timeout=timeout, headers={"User-Agent": "ResearchSynth/0.1"})
         response.raise_for_status()
-        dest.write_bytes(response.content)
-        return str(dest)
     except requests.RequestException as exc:
         print(f"[pdf_reader] could not fetch {paper.id}: {exc}")
         return None
+
+    content = response.content
+    if not content or not content.lstrip()[:5].startswith(b"%PDF-"):
+        print(f"[pdf_reader] {paper.id}'s url didn't return a real PDF (likely a landing page), skipping")
+        return None
+
+    dest.write_bytes(content)
+    return str(dest)
 
 
 def extract_findings(
@@ -99,7 +107,12 @@ def extract_findings(
             paper.pdf_accessible = False
             return []
 
-    sections = get_sections(pdf_path)
+    try:
+        sections = get_sections(pdf_path)
+    except Exception as exc:  # PyMuPDF can raise several exception types on a bad file
+        print(f"[pdf_reader] couldn't parse {paper.id}'s PDF, skipping: {exc}")
+        return []
+
     if not sections:
         print(f"[pdf_reader] no extractable text/sections for {paper.id}")
         return []

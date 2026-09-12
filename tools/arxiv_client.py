@@ -33,7 +33,10 @@ def search_arxiv(query: str, max_results: int = 5) -> list[PaperRecord]:
             title=entry.title.replace("\n", " ").strip(),
             authors=[author.name for author in entry.authors],
             year=year,
-            url=entry.link,
+            # entry.link is the abstract page (/abs/...) - arXiv's PDF is
+            # always at this convention, not something feedparser exposes
+            # directly as a clean field.
+            url=f"https://arxiv.org/pdf/{arxiv_id}",
             pdf_accessible=True,
             subtopic_tags=[]
         )

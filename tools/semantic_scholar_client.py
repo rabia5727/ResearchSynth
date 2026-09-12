@@ -11,7 +11,7 @@ def search_semantic_scholar(query: str, max_results: int = 5, max_retries: int =
     params = {
         "query": query,
         "limit": max_results,
-        "fields": "title,authors,year,externalIds,url,isOpenAccess"
+        "fields": "title,authors,year,externalIds,url,isOpenAccess,openAccessPdf"
     }
 
     for attempt in range(max_retries):
@@ -35,14 +35,19 @@ def search_semantic_scholar(query: str, max_results: int = 5, max_retries: int =
         external_ids = item.get("externalIds") or {}
         paper_id = external_ids.get("DOI") or f"s2:{item['paperId']}"
 
+        # item["url"] is the Semantic Scholar landing page, not a PDF - only
+        # openAccessPdf.url actually points at a downloadable file.
+        open_access_pdf = item.get("openAccessPdf") or {}
+        pdf_url = open_access_pdf.get("url")
+
         paper = PaperRecord(
             id=paper_id,
             source="semantic_scholar",
             title=item.get("title", "Untitled"),
             authors=[a.get("name", "Unknown") for a in item.get("authors", [])],
             year=item.get("year"),
-            url=item.get("url", ""),
-            pdf_accessible=item.get("isOpenAccess", False),
+            url=pdf_url or item.get("url", ""),
+            pdf_accessible=bool(pdf_url),
             subtopic_tags=[]
         )
         papers.append(paper)
