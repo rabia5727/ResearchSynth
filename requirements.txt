@@ -3,6 +3,7 @@ python-dotenv>=1.0
 langgraph>=0.2
 pymupdf>=1.24
 requests>=2.31
+streamlit>=1.38
 
 # LLM providers - install whichever your team picks after the Day-1 smoke test
 # (see the implementation plan, section 2). LLM_PROVIDER=mock needs neither.
