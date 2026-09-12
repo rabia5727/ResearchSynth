@@ -3,7 +3,7 @@ from typing import Dict, List, Any
 from pydantic import BaseModel
 
 from state.schemas import CycleState, ExtractedFinding, ContradictionPair
-from tools.llm import generate_json
+from tools.llm import LLMError, generate_json
 
 class SynthesisResponse(BaseModel):
     markdown_report: str
@@ -20,7 +20,13 @@ class SynthesisWriter:
 
         # Use centralized generate_json abstraction - it returns a validated
         # SynthesisResponse instance, not a dict (see tools/llm.py)
-        response = generate_json(prompt, schema=SynthesisResponse)
+        try:
+            response = generate_json(prompt, schema=SynthesisResponse)
+        except LLMError as exc:
+            # Folded into the same ValueError path graph.py's synthesis_step
+            # already catches (keeps the previous cycle's report rather than
+            # crashing the whole run over a transient provider failure).
+            raise ValueError(f"Synthesis LLM call failed: {exc}") from exc
         report = response.markdown_report
 
         if not report or not report.strip():

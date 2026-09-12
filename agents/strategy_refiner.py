@@ -11,7 +11,7 @@ Responsibilities:
 from typing import Any, Dict, List, Literal
 from pydantic import BaseModel
 
-from tools.llm import generate_json
+from tools.llm import LLMError, generate_json
 
 class RefinerDecision(BaseModel):
     decision: Literal["continue", "stop"]
@@ -124,7 +124,23 @@ def strategy_refiner_node(state: Any) -> Dict[str, Any]:
     
     # generate_json returns a validated RefinerDecision instance, not a dict
     # (see tools/llm.py) - pass the model class itself, not its json schema.
-    response = generate_json(prompt, RefinerDecision)
+    try:
+        response = generate_json(prompt, RefinerDecision)
+    except LLMError as exc:
+        # Default to stop rather than loop indefinitely against a broken or
+        # quota-exhausted provider - the run still ends cleanly with
+        # whatever was found so far instead of crashing.
+        stop_reason = f"Strategy Refiner LLM call failed: {exc}"
+        return {
+            "coverage_score": coverage_score,
+            "stop_reason": stop_reason,
+            "refiner_decision": {
+                "decision": "stop",
+                "new_query_terms": [],
+                "papers_to_reexamine": [],
+                "rationale": stop_reason,
+            },
+        }
 
     return {
         "coverage_score": coverage_score,

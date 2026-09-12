@@ -57,11 +57,14 @@ def _call_gemini(prompt: str, schema: Type[BaseModel], system: str | None) -> st
 
     client = genai.Client(api_key=api_key)
     model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-    response = client.models.generate_content(
-        model=model,
-        contents=f"{system}\n\n{prompt}" if system else prompt,
-        config={"response_mime_type": "application/json", "response_schema": schema},
-    )
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=f"{system}\n\n{prompt}" if system else prompt,
+            config={"response_mime_type": "application/json", "response_schema": schema},
+        )
+    except Exception as exc:  # noqa: BLE001 - any provider failure (quota, network, auth, 5xx) normalizes to LLMError
+        raise LLMError(f"Gemini call failed: {exc}") from exc
     return response.text
 
 
@@ -88,9 +91,12 @@ def _call_groq(prompt: str, schema: Type[BaseModel], system: str | None) -> str:
             "content": f"{prompt}\n\nRespond with ONLY valid JSON matching this schema:\n{schema_hint}",
         }
     )
-    completion = client.chat.completions.create(
-        model=model, messages=messages, response_format={"type": "json_object"}
-    )
+    try:
+        completion = client.chat.completions.create(
+            model=model, messages=messages, response_format={"type": "json_object"}
+        )
+    except Exception as exc:  # noqa: BLE001 - any provider failure (quota, network, auth, 5xx) normalizes to LLMError
+        raise LLMError(f"Groq call failed: {exc}") from exc
     return completion.choices[0].message.content
 
 
