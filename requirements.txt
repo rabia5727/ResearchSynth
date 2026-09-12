@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 pydantic>=2.7
 python-dotenv>=1.0
 pymupdf>=1.24
@@ -10,3 +11,7 @@ groq>=0.11
 
 # Agent 2 test fixture only - not needed to run the app itself
 reportlab>=4.2
+=======
+pydantic>=2.0.0
+google-generativeai>=0.3.0
+>>>>>>> a3fa80c (feat: Add Strategy Refiner and unit test)
