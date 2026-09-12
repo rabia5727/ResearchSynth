@@ -64,3 +64,4 @@ class CycleState(BaseModel):
     strategy_log: list[StrategyMemoryEntry] = []
     coverage_score: float = 0.0
     stop_reason: str | None = None
+    latest_report: str | None = None  # Synthesis Writer's output, regenerated each cycle
