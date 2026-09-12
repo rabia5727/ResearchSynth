@@ -6,6 +6,7 @@ from typing import Callable
 import requests
 
 from state.schemas import PaperRecord
+from tools.http_utils import get_with_hard_timeout
 
 
 def search_semantic_scholar(
@@ -32,7 +33,7 @@ def search_semantic_scholar(
 
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, params=params, timeout=20)
+            response = get_with_hard_timeout(url, params=params, timeout=20, hard_timeout=25)
         except requests.RequestException as exc:
             msg = f"Semantic Scholar network error, retrying... ({exc})"
             print(f"[semantic_scholar] {msg}")

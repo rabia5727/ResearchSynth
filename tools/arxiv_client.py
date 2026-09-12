@@ -8,6 +8,7 @@ import feedparser
 import requests
 
 from state.schemas import PaperRecord
+from tools.http_utils import get_with_hard_timeout
 
 
 def search_arxiv(
@@ -35,7 +36,7 @@ def search_arxiv(
 
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, timeout=20)
+            response = get_with_hard_timeout(url, timeout=20, hard_timeout=25)
         except requests.RequestException as exc:
             msg = f"arXiv network error, retrying... ({exc})"
             print(f"[arxiv] {msg}")
