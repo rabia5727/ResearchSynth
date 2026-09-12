@@ -3,6 +3,7 @@ from google import genai
 from google.genai import types
 from state.schemas import CycleState, ContradictionPair
 from tools import vector_store
+from tools.llm import LLMError, generate_json
 
 def detect_contradictions(state: CycleState) -> dict:
     """
@@ -99,26 +100,18 @@ def detect_contradictions(state: CycleState) -> dict:
                     "Provide a confidence score (0.0 to 1.0) and a concise explanation."
                 )
 
-                # Structured Output Classification
+                # Structured Output Classification - via the shared abstraction
+                # (tools/llm.py) so this respects LLM_PROVIDER=mock/gemini/groq
+                # like every other agent, instead of a direct Gemini call.
                 try:
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=ContradictionPair,
-                            temperature=0.1
-                        )
-                    )
-                    
-                    tension_result = response.parsed
+                    tension_result = generate_json(prompt, ContradictionPair)
                     # Ensure metadata is perfectly intact for Agent 4 and Agent 5
                     tension_result.finding_a_id = finding.id
                     tension_result.finding_b_id = match_id
                     tension_result.resolved = False
-                    
+
                     new_tensions.append(tension_result)
-                except Exception as e:
+                except LLMError as e:
                     print(f"Failed to classify tension between {finding.id} and {match_id}: {e}")
 
     # 6. Append only the tensions list update to LangGraph state

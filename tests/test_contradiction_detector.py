@@ -3,9 +3,6 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agents')))
 
-os.environ["PINECONE_API_KEY"] = "dummy_key"
-os.environ["GEMINI_API_KEY"] = "dummy_key"
-
 import unittest
 import sys
 from unittest.mock import MagicMock, patch
@@ -19,12 +16,13 @@ from agents.contradiction_detector import detect_contradictions
 
 class TestContradictionDetector(unittest.TestCase):
     @patch('agents.contradiction_detector.vector_store')
+    @patch('agents.contradiction_detector.generate_json')
     @patch('agents.contradiction_detector.genai.Client')
-    def test_detect_contradictions(self, MockClient, mock_vector_store):
+    def test_detect_contradictions(self, MockClient, mock_generate_json, mock_vector_store):
         # Setup mock client
         mock_client_instance = MagicMock()
         MockClient.return_value = mock_client_instance
-        
+
         # Setup mock embeddings
         mock_embed_response = MagicMock()
         mock_embed_response.embeddings = [
@@ -32,21 +30,21 @@ class TestContradictionDetector(unittest.TestCase):
             MagicMock(values=[0.2] * 3072)
         ]
         mock_client_instance.models.embed_content.return_value = mock_embed_response
-        
-        # Setup mock generated content for tension classification
-        mock_generate_response = MagicMock()
-        mock_generate_response.parsed = ContradictionPair(
+
+        # Setup mock classification result - generate_json returns a validated
+        # ContradictionPair instance directly (see tools/llm.py), not a
+        # response wrapper with a .parsed attribute.
+        mock_generate_json.return_value = ContradictionPair(
             finding_a_id="f1",
             finding_b_id="f2",
             relation="contradicts",
             score=0.9,
             explanation="Different methodologies resulted in opposing outcomes."
         )
-        mock_client_instance.models.generate_content.return_value = mock_generate_response
 
         # Setup mock vector store search results
         # We need it to return a match above the threshold 0.75
-        def mock_search(query_vector, subtopic, top_k):
+        def mock_search(query_vector, subtopic, namespace, top_k):
             # For finding 1, return finding 2 as a match
             if query_vector == [0.1] * 3072:
                 return {
