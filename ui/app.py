@@ -27,7 +27,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 
 from agents.contradiction_detector import detect_contradictions as _real_detect_contradictions  # noqa: E402
-from graph import GraphState, build_graph  # noqa: E402
+from graph import build_graph  # noqa: E402
 from state.schemas import CycleState  # noqa: E402
 
 DEMO_QUERY = "What is the effect of intermittent fasting on cognitive performance?"
@@ -36,6 +36,12 @@ _RELATION = {
     "contradicts": ("Contradicts", "contradicts"),
     "partial_consensus": ("Partial consensus", "consensus"),
     "methodological_divergence": ("Methodological divergence", "divergence"),
+}
+
+_PROVIDER_LABEL = {
+    "gemini": "Powered by Gemini",
+    "groq": "Powered by Groq",
+    "mock": "Running in offline demo mode - no live model calls",
 }
 
 
@@ -108,6 +114,7 @@ def _decision_pill(decision: str) -> str:
 
 def _render_header() -> None:
     provider = os.environ.get("LLM_PROVIDER", "mock").lower()
+    label = _PROVIDER_LABEL.get(provider, f"Powered by {provider.capitalize()}")
     st.markdown('<span class="rs-eyebrow">Adaptive literature reviewer</span>', unsafe_allow_html=True)
     st.title("ResearchSynth")
     st.markdown(
@@ -116,7 +123,7 @@ def _render_header() -> None:
         'thin - instead of stopping after one pass.</p>',
         unsafe_allow_html=True,
     )
-    st.markdown(_pill(f"LLM_PROVIDER: {provider}", "continue" if provider != "mock" else "stop"), unsafe_allow_html=True)
+    st.caption(label)
     st.write("")
 
 
@@ -147,22 +154,41 @@ def _run_and_render(query: str, max_cycles: int) -> None:
         )
         ctx = patch("graph.detect_contradictions", return_value={"tensions": []})
 
-    app = _get_app()
-    initial_state: GraphState = {
+    current: dict = {
         "cycle": CycleState(query=query, max_cycles=max_cycles),
         "pending_refiner_decision": None,
         "current_query_terms": [],
+        "on_progress": None,
     }
-
-    current: dict = dict(initial_state)
-    cycle_status = None
 
     st.divider()
     st.subheader("Run")
 
+    # Lazily-created status box, one per cycle - this is what makes the slow
+    # part (real network calls inside Searcher/PDF Reader) show live progress
+    # instead of a blank wait: on_progress fires from deep inside those
+    # functions, well before the node itself returns and LangGraph yields a
+    # chunk for it.
+    ui_state = {"box": None, "awaiting_new_cycle": True}
+
+    def show_progress(message: str) -> None:
+        if ui_state["box"] is None or ui_state["awaiting_new_cycle"]:
+            next_cycle_n = current["cycle"].cycle_n + 1
+            ui_state["box"] = st.status(f"Cycle {next_cycle_n}", expanded=True)
+            ui_state["awaiting_new_cycle"] = False
+        ui_state["box"].write(message)
+
+    def complete_cycle(label_suffix: str) -> None:
+        if ui_state["box"] is not None:
+            ui_state["box"].update(label=f"Cycle {current['cycle'].cycle_n} - {label_suffix}", state="complete")
+        ui_state["awaiting_new_cycle"] = True
+
+    current["on_progress"] = show_progress
+    app = _get_app()
+
     try:
         with ctx:
-            for chunk in app.stream(initial_state, stream_mode="updates"):
+            for chunk in app.stream(current, stream_mode="updates"):
                 (node_name, update), = chunk.items()
                 if update:  # LangGraph reports a node's {} return as None here
                     current.update(update)
@@ -172,26 +198,23 @@ def _run_and_render(query: str, max_cycles: int) -> None:
                     st.markdown(f"**Decomposed into subtopics:** {', '.join(cycle.subtopics)}")
 
                 elif node_name == "searcher":
-                    cycle_status = st.status(f"Cycle {cycle.cycle_n}", expanded=True)
-                    terms = ", ".join(current["current_query_terms"])
-                    cycle_status.write(f"Searching with: {terms}")
-                    cycle_status.write(f"Papers so far: {len(cycle.papers)}")
+                    show_progress(f"Search complete - {len(cycle.papers)} paper(s) so far")
 
                 elif node_name == "pdf_reader":
-                    cycle_status.write(f"Findings extracted - {len(cycle.findings)} total so far")
+                    show_progress(f"Extraction complete - {len(cycle.findings)} finding(s) so far")
 
                 elif node_name == "contradiction_detector":
-                    cycle_status.write(f"Tensions detected - {len(cycle.tensions)} total so far")
+                    show_progress(f"{len(cycle.tensions)} tension(s) detected so far")
 
                 elif node_name == "synthesis_writer":
                     msg = "Synthesis written" if cycle.latest_report else "Synthesis skipped (insufficient grounded evidence this cycle)"
-                    cycle_status.write(msg)
+                    show_progress(msg)
 
                 elif node_name == "strategy_refiner":
                     decision = current["pending_refiner_decision"]
-                    cycle_status.write(f"Coverage: {cycle.coverage_score:.0%}")
-                    cycle_status.write(f"Refiner decision: {decision['decision']} - {decision['rationale']}")
-                    cycle_status.update(label=f"Cycle {cycle.cycle_n} - {decision['decision']}", state="complete")
+                    show_progress(f"Coverage: {cycle.coverage_score:.0%}")
+                    show_progress(f"Decision: {decision['decision']} - {decision['rationale']}")
+                    complete_cycle(decision["decision"])
     except Exception as exc:  # surface it in the UI rather than a bare traceback
         st.error(f"The run stopped early: {exc}")
 

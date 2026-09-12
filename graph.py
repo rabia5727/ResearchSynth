@@ -12,7 +12,7 @@ Strategy Refiner reads to decide whether coverage is good enough yet.
 """
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from langgraph.graph import END, StateGraph
 
@@ -40,6 +40,7 @@ class GraphState(TypedDict):
     cycle: CycleState
     pending_refiner_decision: dict | None  # None until cycle 1's Refiner runs
     current_query_terms: list[str]  # terms Searcher just used this pass
+    on_progress: Callable[[str], None] | None  # optional live-progress hook for a UI
 
 
 def decompose_step(state: GraphState) -> dict:
@@ -56,8 +57,9 @@ def searcher_step(state: GraphState) -> dict:
     cycle 1, the Refiner's new_query_terms on every cycle after)."""
     cycle = state["cycle"]
     refiner_decision = state["pending_refiner_decision"]
+    on_progress = state.get("on_progress")
 
-    result = searcher_node(cycle, refiner_decision=refiner_decision)
+    result = searcher_node(cycle, refiner_decision=refiner_decision, on_progress=on_progress)
     new_papers: list[PaperRecord] = result.get("new_papers", [])
 
     query_terms = (
@@ -88,6 +90,7 @@ def pdf_reader_step(state: GraphState) -> dict:
     cycle = state["cycle"]
     refiner_decision = state["pending_refiner_decision"]
     reexamine_ids = set(refiner_decision["papers_to_reexamine"]) if refiner_decision else set()
+    on_progress = state.get("on_progress")
 
     findings = list(cycle.findings)
     already_covered = {f.paper_id for f in findings}
@@ -97,21 +100,29 @@ def pdf_reader_step(state: GraphState) -> dict:
     new_finding_count = 0
 
     # New papers this cycle - never processed before
-    for paper in cycle.papers:
-        if paper.id in already_covered and paper.id not in reexamine_ids:
-            continue
-        if paper.id in reexamine_ids:
-            continue  # handled separately below, with force_refresh + focus_note
+    to_process = [
+        p for p in cycle.papers
+        if p.id not in already_covered or p.id in reexamine_ids
+    ]
+    to_process = [p for p in to_process if p.id not in reexamine_ids]  # reexamined handled below
+
+    for i, paper in enumerate(to_process):
+        if on_progress:
+            on_progress(f"Reading paper {i + 1}/{len(to_process)}: \"{paper.title}\"")
         new_paper_count += 1
         extracted = extract_findings(paper)
         findings.extend(extracted)
         new_finding_count += len(extracted)
+        if on_progress:
+            on_progress(f"  -> {len(extracted)} finding(s) extracted" if extracted else "  -> no findings (inaccessible or ungrounded)")
 
     # Re-examined papers - replace their old findings with a fresh pass
     for paper_id in reexamine_ids:
         paper = papers_by_id.get(paper_id)
         if paper is None:
             continue
+        if on_progress:
+            on_progress(f"Re-examining \"{paper.title}\"...")
         findings = [f for f in findings if f.paper_id != paper_id]
         extracted = extract_findings(
             paper, force_refresh=True, focus_note=refiner_decision.get("rationale")
@@ -140,6 +151,9 @@ def contradiction_step(state: GraphState) -> dict:
     dedupe against tensions we already recorded in an earlier cycle before
     appending (same pair, same relation, doesn't need to be added twice)."""
     cycle = state["cycle"]
+    on_progress = state.get("on_progress")
+    if on_progress and cycle.findings:
+        on_progress(f"Comparing {len(cycle.findings)} finding(s) for contradictions...")
     result = detect_contradictions(cycle)
     candidate_tensions = result.get("tensions", [])
 
@@ -165,6 +179,9 @@ def synthesis_step(state: GraphState) -> dict:
     version is the deliverable. A grounding failure shouldn't crash the
     whole loop, so on ValueError we log it and keep the previous report."""
     cycle = state["cycle"]
+    on_progress = state.get("on_progress")
+    if on_progress:
+        on_progress("Writing the synthesis report...")
     try:
         report = _synthesis_writer.synthesize(cycle)
     except ValueError as exc:
@@ -178,6 +195,9 @@ def refiner_step(state: GraphState) -> dict:
     """Node 5 - the core differentiator. Evaluates coverage, decides
     continue/stop, and (on continue) proposes the next cycle's strategy."""
     cycle = state["cycle"]
+    on_progress = state.get("on_progress")
+    if on_progress:
+        on_progress("Evaluating coverage and deciding whether to continue...")
     result = strategy_refiner_node(cycle)
     decision = result["refiner_decision"]
 
@@ -223,14 +243,24 @@ def build_graph():
     return graph.compile()
 
 
-def run(query: str, max_cycles: int = 2) -> CycleState:
+def run(
+    query: str,
+    max_cycles: int = 2,
+    on_progress: Callable[[str], None] | None = None,
+) -> CycleState:
     """Convenience entry point: run the full adaptive loop for one query
-    and return the final CycleState (report, tensions, strategy_log, etc.)."""
+    and return the final CycleState (report, tensions, strategy_log, etc.).
+
+    on_progress, if given, receives short human-readable status strings as
+    the run happens - see GraphState. Useful for a UI to show live progress
+    instead of a blank wait during the (often slowest) search phase.
+    """
     app = build_graph()
     initial_state: GraphState = {
         "cycle": CycleState(query=query, max_cycles=max_cycles),
         "pending_refiner_decision": None,
         "current_query_terms": [],
+        "on_progress": on_progress,
     }
     final_state = app.invoke(initial_state)
     return final_state["cycle"]

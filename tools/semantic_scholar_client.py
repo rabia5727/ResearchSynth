@@ -1,12 +1,26 @@
 """Semantic Scholar search client — queries the Graph API and returns PaperRecords."""
 
 import time
+from typing import Callable
+
 import requests
 
 from state.schemas import PaperRecord
 
 
-def search_semantic_scholar(query: str, max_results: int = 5, max_retries: int = 3) -> list[PaperRecord]:
+def search_semantic_scholar(
+    query: str,
+    max_results: int = 5,
+    max_retries: int = 3,
+    on_progress: Callable[[str], None] | None = None,
+) -> list[PaperRecord]:
+    """on_progress, if given, is called with short human-readable status
+    strings as the search happens - lets a UI show what's taking a while
+    instead of sitting on a blank screen during retries."""
+    def notify(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+
     url = "https://api.semanticscholar.org/graph/v1/paper/search"
     params = {
         "query": query,
@@ -14,29 +28,39 @@ def search_semantic_scholar(query: str, max_results: int = 5, max_retries: int =
         "fields": "title,authors,year,externalIds,url,isOpenAccess,openAccessPdf"
     }
 
+    notify(f"Searching Semantic Scholar for \"{query}\"...")
+
     for attempt in range(max_retries):
         try:
             response = requests.get(url, params=params, timeout=20)
         except requests.RequestException as exc:
-            print(f"[semantic_scholar] network error ({exc}), retrying...")
+            msg = f"Semantic Scholar network error, retrying... ({exc})"
+            print(f"[semantic_scholar] {msg}")
+            notify(msg)
             time.sleep(5 * (attempt + 1))
             continue
 
         if response.status_code == 429 or response.status_code >= 500:
             wait_time = 5 * (attempt + 1)
-            print(f"Semantic Scholar returned {response.status_code}. Waiting {wait_time}s before retry...")
+            msg = f"Semantic Scholar returned {response.status_code} - waiting {wait_time}s before retry"
+            print(msg)
+            notify(msg)
             time.sleep(wait_time)
             continue
 
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
-            print(f"[semantic_scholar] giving up on this query: {exc}")
+            msg = f"Semantic Scholar request failed, skipping this term ({exc})"
+            print(f"[semantic_scholar] {msg}")
+            notify(msg)
             return []
         data = response.json()
         break
     else:
-        print("Semantic Scholar still unavailable after retries. Skipping this query.")
+        msg = "Semantic Scholar still unavailable after retries - skipping this term"
+        print(msg)
+        notify(msg)
         return []
 
     papers = []
@@ -61,4 +85,5 @@ def search_semantic_scholar(query: str, max_results: int = 5, max_retries: int =
         )
         papers.append(paper)
 
+    notify(f"Found {len(papers)} paper(s) on Semantic Scholar for \"{query}\"")
     return papers
