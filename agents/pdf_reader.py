@@ -73,15 +73,25 @@ def extract_findings(
     pdf_path: str | None = None,
     *,
     cache_dir: str | Path = ".cache/findings",
+    force_refresh: bool = False,
+    focus_note: str | None = None,
 ) -> list[ExtractedFinding]:
     """The agent's main entry point. Returns [] (not an exception) when the
     paper is inaccessible or extraction fails - callers should keep going
     with the rest of the batch, per the plan's paywall-handling risk mitigation.
+
+    Re-examination (FR-11/Strategy Refiner asking to look at a paper again):
+    pass force_refresh=True to skip the findings cache, and optionally a
+    focus_note describing what the Refiner thinks was missed (e.g. "look for
+    reported study duration in the methodology section") - it gets folded
+    into the extraction prompt. The downloaded PDF itself is still reused
+    from .cache/pdfs (no need to re-fetch), only the LLM extraction re-runs.
     """
     cache_dir = Path(cache_dir)
-    cached = _load_from_cache(paper.id, cache_dir)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        cached = _load_from_cache(paper.id, cache_dir)
+        if cached is not None:
+            return cached
 
     if pdf_path is None:
         pdf_path = fetch_pdf(paper)
@@ -94,7 +104,7 @@ def extract_findings(
         print(f"[pdf_reader] no extractable text/sections for {paper.id}")
         return []
 
-    prompt = _build_prompt(paper, sections)
+    prompt = _build_prompt(paper, sections, focus_note=focus_note)
     try:
         extraction = generate_json(prompt, _FindingsExtraction, system=_SYSTEM_PROMPT)
     except LLMError as exc:
@@ -119,11 +129,18 @@ def extract_findings(
     return findings
 
 
-def _build_prompt(paper: PaperRecord, sections: dict[str, str]) -> str:
+def _build_prompt(paper: PaperRecord, sections: dict[str, str], *, focus_note: str | None = None) -> str:
     section_text = "\n\n".join(f"## {name.upper()}\n{body}" for name, body in sections.items())
+    focus_block = (
+        f"\nA previous pass over this paper may have missed something: "
+        f"{focus_note}\nPay particular attention to this while extracting.\n"
+        if focus_note
+        else ""
+    )
     return (
         f"Paper title: {paper.title}\n\n"
-        f"{section_text}\n\n"
+        f"{section_text}\n"
+        f"{focus_block}\n"
         "Extract every distinct finding as a structured object: claim, "
         "method, dataset, metric, value, limitations, and which section it "
         "came from (section_source). A paper may report more than one finding."
