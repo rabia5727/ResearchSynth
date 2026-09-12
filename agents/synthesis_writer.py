@@ -18,9 +18,10 @@ class SynthesisWriter:
 
         prompt = self._build_prompt(state)
 
-        # Use centralized generate_json abstraction
-        response_dict = generate_json(prompt, schema=SynthesisResponse)
-        report = response_dict.get("markdown_report", "")
+        # Use centralized generate_json abstraction - it returns a validated
+        # SynthesisResponse instance, not a dict (see tools/llm.py)
+        response = generate_json(prompt, schema=SynthesisResponse)
+        report = response.markdown_report
 
         if not report or not report.strip():
             raise ValueError("LLM returned an empty response.")

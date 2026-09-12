@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch
 from state.schemas import CycleState, ExtractedFinding, PaperRecord, ContradictionPair
-from agents.synthesis_writer import SynthesisWriter
+from agents.synthesis_writer import SynthesisWriter, SynthesisResponse
 
 @pytest.fixture
 def base_state():
@@ -64,16 +64,16 @@ def base_state():
 def test_synthesis_writer_valid(base_state):
     # TEST 1: Valid findings + valid tensions -> accepted
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "# Synthesis Report\n\n## Attention\nThe first study found improved attention. [F001]\n\n## Memory\nThe second study found decreased memory. [F002]"}
+    mock_response = SynthesisResponse(markdown_report="# Synthesis Report\n\n## Attention\nThe first study found improved attention. [F001]\n\n## Memory\nThe second study found decreased memory. [F002]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response) as mock_llm:
         report = writer.synthesize(base_state)
         mock_llm.assert_called_once()
-        assert report == mock_response["markdown_report"]
+        assert report == mock_response.markdown_report
 
 def test_synthesis_writer_invalid_finding_id(base_state):
     # TEST 2: Generated report contains an invalid finding ID -> rejected.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "# Synthesis Report\nThis sentence has an invalid ID. [F999]"}
+    mock_response = SynthesisResponse(markdown_report="# Synthesis Report\nThis sentence has an invalid ID. [F999]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match=r"Grounding validation failed[\s\S]*Invalid IDs: \['F999'\]"):
             writer.synthesize(base_state)
@@ -81,7 +81,7 @@ def test_synthesis_writer_invalid_finding_id(base_state):
 def test_synthesis_writer_ungrounded_sentence(base_state):
     # TEST 3: Generated report contains a narrative sentence without finding ID -> rejected.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "# Synthesis Report\nThis is a narrative sentence without any citation."}
+    mock_response = SynthesisResponse(markdown_report="# Synthesis Report\nThis is a narrative sentence without any citation.")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match=r"Grounding validation failed[\s\S]*Ungrounded Sentences: \['This is a narrative sentence without any citation.'\]"):
             writer.synthesize(base_state)
@@ -89,19 +89,19 @@ def test_synthesis_writer_ungrounded_sentence(base_state):
 def test_synthesis_writer_multiple_valid_ids(base_state):
     # TEST 4: Generated report contains multiple valid finding IDs -> accepted.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "# Synthesis Report\nMultiple citations support this. [F001] [F002]"}
+    mock_response = SynthesisResponse(markdown_report="# Synthesis Report\nMultiple citations support this. [F001] [F002]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         report = writer.synthesize(base_state)
-        assert report == mock_response["markdown_report"]
+        assert report == mock_response.markdown_report
 
 def test_synthesis_writer_no_tensions(base_state):
     # TEST 5: No tensions -> synthesis still works.
     base_state.tensions = []
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "This works without tensions. [F001]"}
+    mock_response = SynthesisResponse(markdown_report="This works without tensions. [F001]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         report = writer.synthesize(base_state)
-        assert report == mock_response["markdown_report"]
+        assert report == mock_response.markdown_report
         prompt = writer._build_prompt(base_state)
         assert "Tensions in this Subtopic:" not in prompt
 
@@ -160,7 +160,7 @@ def test_synthesis_writer_unassigned_finding(base_state):
 def test_synthesis_writer_malformed_citation(base_state):
     # TEST 12: Malformed citation is detected and causes validation failure.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "This citation is malformed. [F@001]"}
+    mock_response = SynthesisResponse(markdown_report="This citation is malformed. [F@001]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match=r"Grounding validation failed[\s\S]*Malformed Citations: \['F@001'\]"):
             writer.synthesize(base_state)
@@ -168,7 +168,7 @@ def test_synthesis_writer_malformed_citation(base_state):
 def test_synthesis_writer_short_ungrounded_sentence(base_state):
     # TEST 13: Short narrative/evidence sentence without citation is rejected.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "Short claim."} # No exemption for < 3 words
+    mock_response = SynthesisResponse(markdown_report="Short claim.")  # No exemption for < 3 words
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match=r"Grounding validation failed[\s\S]*Ungrounded Sentences: \['Short claim.'\]"):
             writer.synthesize(base_state)
@@ -176,7 +176,7 @@ def test_synthesis_writer_short_ungrounded_sentence(base_state):
 def test_synthesis_writer_empty_response(base_state):
     # TEST 14: Empty LLM response is handled safely.
     writer = SynthesisWriter()
-    with patch("agents.synthesis_writer.generate_json", return_value={"markdown_report": "   "}):
+    with patch("agents.synthesis_writer.generate_json", return_value=SynthesisResponse(markdown_report="   ")):
         with pytest.raises(ValueError, match="LLM returned an empty response."):
             writer.synthesize(base_state)
 
@@ -216,7 +216,7 @@ def test_synthesis_writer_tension_associated_ids(base_state):
 def test_synthesis_writer_abbreviations(base_state):
     # TEST 19: Abbreviations like e.g., i.e. do not split the sentence prematurely.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "Many metrics (e.g. score, i.e. time) improved. [F001]"}
+    mock_response = SynthesisResponse(markdown_report="Many metrics (e.g. score, i.e. time) improved. [F001]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         # Should not raise validation error because the citation belongs to the single sentence
         writer.synthesize(base_state)
@@ -224,7 +224,7 @@ def test_synthesis_writer_abbreviations(base_state):
 def test_synthesis_writer_multiple_sentences_in_line(base_state):
     # TEST 20: Multiple sentences in a line are handled. The first fails because it has no citation.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "Evidence suggests improved attention. However, the effect varies across studies. [F001] [F002]"}
+    mock_response = SynthesisResponse(markdown_report="Evidence suggests improved attention. However, the effect varies across studies. [F001] [F002]")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match=r"Grounding validation failed[\s\S]*Ungrounded Sentences: \['Evidence suggests improved attention.'\]"):
             writer.synthesize(base_state)
@@ -232,7 +232,7 @@ def test_synthesis_writer_multiple_sentences_in_line(base_state):
 def test_synthesis_writer_bulleted_lists(base_state):
     # TEST 21: Bullets are preserved correctly and evaluated.
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "- First finding. [F001]\n- Second finding without citation."}
+    mock_response = SynthesisResponse(markdown_report="- First finding. [F001]\n- Second finding without citation.")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match=r"Grounding validation failed[\s\S]*Ungrounded Sentences: \['- Second finding without citation.'\]"):
             writer.synthesize(base_state)
@@ -268,27 +268,27 @@ def test_synthesis_writer_valid_citations_after_punctuation(base_state):
         "The study found improved attention. [F001] [F002]"
     ]
     for resp in mock_responses:
-        with patch("agents.synthesis_writer.generate_json", return_value={"markdown_report": resp}):
+        with patch("agents.synthesis_writer.generate_json", return_value=SynthesisResponse(markdown_report=resp)):
             # Should not raise exception
             writer.synthesize(base_state)
 
 def test_synthesis_writer_citation_before_sentence_fails(base_state):
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "[F001] The study found improved attention."}
+    mock_response = SynthesisResponse(markdown_report="[F001] The study found improved attention.")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match="Grounding validation failed"):
             writer.synthesize(base_state)
 
 def test_synthesis_writer_citation_in_middle_fails(base_state):
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "The study [F001] found improved attention."}
+    mock_response = SynthesisResponse(markdown_report="The study [F001] found improved attention.")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match="Grounding validation failed"):
             writer.synthesize(base_state)
 
 def test_synthesis_writer_completely_uncited_sentence(base_state):
     writer = SynthesisWriter()
-    mock_response = {"markdown_report": "The study found improved attention."}
+    mock_response = SynthesisResponse(markdown_report="The study found improved attention.")
     with patch("agents.synthesis_writer.generate_json", return_value=mock_response):
         with pytest.raises(ValueError, match="Grounding validation failed"):
             writer.synthesize(base_state)
