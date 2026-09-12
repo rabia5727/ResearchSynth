@@ -10,3 +10,5 @@ groq>=0.11
 
 # Agent 2 test fixture only - not needed to run the app itself
 reportlab>=4.2
+rapidfuzz>=3.0
+feedparser>=6.0
