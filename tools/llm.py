@@ -56,7 +56,7 @@ def _call_gemini(prompt: str, schema: Type[BaseModel], system: str | None) -> st
         raise LLMError("GEMINI_API_KEY is not set")
 
     client = genai.Client(api_key=api_key)
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     response = client.models.generate_content(
         model=model,
         contents=f"{system}\n\n{prompt}" if system else prompt,

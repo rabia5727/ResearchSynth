@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
+import time
 
 from pydantic import BaseModel
 from rapidfuzz import fuzz
@@ -19,8 +20,17 @@ class _SubtopicList(BaseModel):
     subtopics: list[str]
 
 
+class _PaperTag(BaseModel):
+    index: int
+    subtopics: list[str]
+
+
 class _PaperTags(BaseModel):
-    tags_by_index: dict[str, list[str]]
+    # A list of {index, subtopics} rather than dict[str, list[str]] - Gemini's
+    # Developer API rejects response schemas using additionalProperties (the
+    # JSON Schema shape a dict-typed field produces), so a free-form mapping
+    # isn't usable as a structured-output schema at all.
+    tags: list[_PaperTag]
 
 
 def decompose_query(query: str) -> list[str]:
@@ -68,8 +78,7 @@ def tag_papers(papers: list[PaperRecord], subtopics: list[str]) -> list[PaperRec
     paper_list_text = "\n".join(f"{i}. {p.title}" for i, p in enumerate(papers))
     prompt = (
         f"Subtopics: {json.dumps(subtopics)}\n\nPapers:\n{paper_list_text}\n\n"
-        "For each paper (by its number above, as a string key), list which "
-        "subtopics it relates to."
+        "For each paper (by its number above), list which subtopics it relates to."
     )
 
     try:
@@ -78,16 +87,25 @@ def tag_papers(papers: list[PaperRecord], subtopics: list[str]) -> list[PaperRec
         print(f"[searcher] tagging failed, leaving papers untagged: {exc}")
         return papers
 
+    tags_by_index = {tag.index: tag.subtopics for tag in result.tags}
     for i, paper in enumerate(papers):
-        paper.subtopic_tags = result.tags_by_index.get(str(i), [])
+        paper.subtopic_tags = tags_by_index.get(i, [])
 
     return papers
 
 
 def search_all_terms(terms: list[str], max_results_per_source: int = 3) -> list[PaperRecord]:
-    """Searches both arXiv and Semantic Scholar for every term given."""
+    """Searches both arXiv and Semantic Scholar for every term given.
+
+    A real decomposition can easily produce 5-6 subtopics, each firing two
+    searches - a short pause between terms is enough to avoid tripping both
+    APIs' rate limits in the first place, rather than relying on retry/backoff
+    to recover every time.
+    """
     all_papers = []
-    for term in terms:
+    for i, term in enumerate(terms):
+        if i > 0:
+            time.sleep(1)
         all_papers.extend(search_arxiv(term, max_results=max_results_per_source))
         all_papers.extend(search_semantic_scholar(term, max_results=max_results_per_source))
     return all_papers

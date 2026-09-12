@@ -15,19 +15,28 @@ def search_semantic_scholar(query: str, max_results: int = 5, max_retries: int =
     }
 
     for attempt in range(max_retries):
-        response = requests.get(url, params=params)
+        try:
+            response = requests.get(url, params=params, timeout=20)
+        except requests.RequestException as exc:
+            print(f"[semantic_scholar] network error ({exc}), retrying...")
+            time.sleep(5 * (attempt + 1))
+            continue
 
-        if response.status_code == 429:
+        if response.status_code == 429 or response.status_code >= 500:
             wait_time = 5 * (attempt + 1)
-            print(f"Rate limited by Semantic Scholar. Waiting {wait_time}s before retry...")
+            print(f"Semantic Scholar returned {response.status_code}. Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
             continue
 
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            print(f"[semantic_scholar] giving up on this query: {exc}")
+            return []
         data = response.json()
         break
     else:
-        print("Semantic Scholar still rate-limited after retries. Skipping this query.")
+        print("Semantic Scholar still unavailable after retries. Skipping this query.")
         return []
 
     papers = []

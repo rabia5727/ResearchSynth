@@ -4,12 +4,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agents')))
 
 import unittest
-import sys
 from unittest.mock import MagicMock, patch
-
-# Mock Pinecone to prevent network calls during import
-sys.modules['pinecone'] = MagicMock()
-sys.modules['pinecone'].Pinecone = MagicMock()
 
 from state.schemas import CycleState, ExtractedFinding, PaperRecord, ContradictionPair
 from agents.contradiction_detector import detect_contradictions
