@@ -6,3 +6,4 @@ venv/
 .cache/
 *.egg-info/
 .pytest_cache/
+tests/fixtures/*.pdf
