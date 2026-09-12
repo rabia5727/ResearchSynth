@@ -1,0 +1,12 @@
+pydantic>=2.7
+python-dotenv>=1.0
+pymupdf>=1.24
+requests>=2.31
+
+# LLM providers - install whichever your team picks after the Day-1 smoke test
+# (see the implementation plan, section 2). LLM_PROVIDER=mock needs neither.
+google-genai>=0.3
+groq>=0.11
+
+# Agent 2 test fixture only - not needed to run the app itself
+reportlab>=4.2
